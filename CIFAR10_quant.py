@@ -3,6 +3,7 @@ import numpy as np
 import copy
 from keras.models import load_model
 from keras.utils import print_summary, to_categorical
+import sys
 
 from keras.datasets import cifar10
 
@@ -15,46 +16,90 @@ y_test = to_categorical(y_test, num_classes)
 x_test = x_test.astype('float32')
 x_test /= 255.0
 
-total_influence = 0
+# total_influence = 0
 num_weight = 0
 max_weight = 0
 min_weight = 0
+total_influence_list = []
+layer_size_list = []
 
 def cal_influence(weights, num_neighbors):
-    global total_influence
+    global total_influence_list
+    global layer_size_list
     n = len(weights)
     weights = copy.deepcopy(weights)
-    newlist = []
-    for i in range(n):
-        if len(np.shape(weights[i])) == 1:  # skip layers with 1-dimesnion weights
-            continue
-        newlist = np.concatenate((newlist, weights[i].flatten()))
-    newlist = sorted(newlist)
+    # newlist = []
+
+    # for i in range(n):
+    #     if len(np.shape(weights[i])) == 1:  # skip layers with 1-dimesnion weights
+    #         continue
+    #     np.argsort(weights[i].flatten())
+    #     newlist.append(weights[i].flatten())
+        # newlist = np.concatenate((newlist, weights[i].flatten()))
+    # newlist = sorted(newlist)
 
     influence_list = []
-    m = len(newlist)
-    for j in range(m):  # for each weight
-        neighbor_sum = 0
-        neighbor_list = []
+    for i in range(len(weights)):  # for each layer
+        if len(np.shape(weights[i])) == 1:  # skip layers with 1-dimesnion weights
+            continue
+        
+        # to 1-dimension
+        sort_idx = np.argsort(weights[i].flatten())
+        sorted_layer_weight = np.sort(weights[i].flatten())
 
-        for k in range(1, num_neighbors + 1):
-            if j - k >= 0:
-                neighbor_list.append(abs(newlist[j - k] - newlist[j]))
-            if j + k < m:
-                neighbor_list.append(abs(newlist[j + k] - newlist[j]))
+        layer_total_influence = 0
+        layer_influence = np.zeros(weights[i].flatten().shape)
 
-        neighbor_list = sorted(neighbor_list)
-        neighbor_list = neighbor_list[0:num_neighbors]
-        neighbor_sum = sum(neighbor_list)
-        neighbor_sum /= num_neighbors
-        this_influence = newlist[j] ** 2 / neighbor_sum
-        total_influence += this_influence
+        for j in range(sorted_layer_weight.size):  # for each weight in the layer
+            # calcuate sum of neighbors
+            neighbor_sum = 0
+            neighbor_list = []
 
-        influence_list.append(this_influence)
+            for k in range(1, num_neighbors + 1):
+                if j - k >= 0:
+                    neighbor_list.append(abs(sorted_layer_weight[j - k] - sorted_layer_weight[j]))
+                if j + k < sorted_layer_weight.size:
+                    neighbor_list.append(abs(sorted_layer_weight[j + k] - sorted_layer_weight[j]))
+
+            neighbor_list = sorted(neighbor_list)
+            neighbor_list = neighbor_list[0:num_neighbors]
+            neighbor_sum = sum(neighbor_list)
+            neighbor_sum /= num_neighbors
+            
+            # calcuate influence
+            this_influence = sorted_layer_weight[j] ** 2 / neighbor_sum
+
+            layer_total_influence += this_influence
+            layer_influence[sort_idx[j]] = this_influence
+        
+        total_influence_list.append(layer_total_influence)
+        influence_list.append(layer_influence)
+
+    # influence_list = []
+    # m = len(newlist)
+    # for j in range(m):  # for each weight
+    #     neighbor_sum = 0
+    #     neighbor_list = []
+
+    #     for k in range(1, num_neighbors + 1):
+    #         if j - k >= 0:
+    #             neighbor_list.append(abs(newlist[j - k] - newlist[j]))
+    #         if j + k < m:
+    #             neighbor_list.append(abs(newlist[j + k] - newlist[j]))
+
+    #     neighbor_list = sorted(neighbor_list)
+    #     neighbor_list = neighbor_list[0:num_neighbors]
+    #     neighbor_sum = sum(neighbor_list)
+    #     neighbor_sum /= num_neighbors
+
+    #     this_influence = newlist[j] ** 2 / neighbor_sum
+    #     total_influence += this_influence
+
+    #     influence_list.append(this_influence)
 
     # rehshape
     influence = []
-    count_size = 0
+    # count_size = 0
     for i in range(n):
         layer_shape = np.shape(weights[i])
         if len(layer_shape) == 1:
@@ -64,46 +109,86 @@ def cal_influence(weights, num_neighbors):
             for size in layer_shape:
                 layer_size *= size
 
-            layer_list = influence_list[count_size : count_size + layer_size]
-            count_size += layer_size
+            # layer_list = influence_list[count_size : count_size + layer_size]
+            layer_list = influence_list[round(i/2)]
+            # count_size += layer_size
             layer_weights = np.reshape(np.array(layer_list), layer_shape)
             influence.append(layer_weights)
+            layer_size_list.append(layer_size)
 
     return influence
 
-def allocate_bits(influence, total_bits):
-    global total_influence
-    for i in range(len(influence)):
+def allocate_bits(influence, bits_per_weight):
+    global total_influence_list
+    for i in range(len(influence)):  # for each non-1-dimension layer
+        layer_total_influence = total_influence_list[i]
+        layer_total_bits = bits_per_weight * layer_size_list[i]
         layer_bits_allo = []
-        for influ in influence[i].flatten():
-            layer_bits_allo.append(total_bits * influ // total_influence + 2)
+        for influ in influence[i].flatten():  # for each weight influence in the layer
+            layer_bits_allo.append(layer_total_bits * influ // layer_total_influence + 2)
         influence[i] = np.reshape(np.array(layer_bits_allo), np.shape(influence[i]))
     return influence
 
 
-# def uniform_allocate_bits(influence, bits_per_weight):
-#     global total_influence
-#     for i in range(len(influence)):
-#         for x in range(len(influence[i])):
-#             for y in range(len(influence[i][0])):
-#                 influence[i][x][y] = bits_per_weight
-#     return influence
+def uniform_allocate_bits(influence, bits_per_weight):
+    global total_influence_list
+    for i in range(len(influence)):  # for each non-1-dimension layer
+        # layer_total_influence = total_influence_list[i]
+        # layer_total_bits = bits_per_weight * layer_size_list[i]
+        layer_bits_allo = []
+        for j in range(influence[i].flatten().size):  # for each weight influence in the layer
+            layer_bits_allo.append(bits_per_weight + 2)
+        influence[i] = np.reshape(np.array(layer_bits_allo), np.shape(influence[i]))
+    return influence
 
-def quant(weights, allocation):
-    global max_abs
+# def quant_round(realnum, bit):
+#     if realnum < 0:
+#         roundnum = 0
+#     elif realnum > 2 ** bit - 1:
+#         roundnum = 2 ** bit - 1
+#     else:
+#         roundnum = np.around(realnum)
+    
+#     return roundnum
+
+def clamp(realnum, a, b):
+    if realnum < a:
+        return a
+    elif realnum > b:
+        return b
+    else:
+        return realnum
+
+def quant(weights, allocation, range_list):
+    global max_weight_all
+    global min_weight_all
+    # global max_abs
+    global max_abs_all
+    global min_abs_all
     n = len(weights)
     new_weights = []
     for i in range(n):
         if len(np.shape(weights[i])) == 1: 
             new_weights.append(weights[i])
         else:
+            layer_range = range_list[round(i/2)]
             layer_allo = allocation[round(i/2)].flatten()
             layer_weights = weights[i].flatten()
             for j in range(layer_weights.size):
-                scale = (2 ** (layer_allo[j] - 1) - 1) / max_abs
+                # scale = (max_weight_all - min_weight_all) / (2 ** layer_allo[j])
+                # layer_weights[j] = clamp(layer_weights[j], min_weight_all, max_weight_all)
+                # layer_weights[j] = np.around((layer_weights[j] - min_weight_all) / scale)
+                # layer_weights[j] = layer_weights[j] * scale + min_weight_all
+
+                scale = layer_range / (2 ** (layer_allo[j] - 1))
+                layer_weights[j] = clamp(layer_weights[j], -layer_range, layer_range)
+                layer_weights[j] = np.around(layer_weights[j] / scale)
                 layer_weights[j] = layer_weights[j] * scale
-                layer_weights[j] = np.around(layer_weights[j])
-                layer_weights[j] = layer_weights[j] / scale
+
+                # scale = (2 ** (layer_allo[j] - 1) - 1) / max_abs
+                # layer_weights[j] = layer_weights[j] * scale
+                # layer_weights[j] = np.around(layer_weights[j])
+                # layer_weights[j] = layer_weights[j] / scale
             layer_weights = np.reshape(layer_weights, np.shape(weights[i]))
             new_weights.append(layer_weights)
 
@@ -117,25 +202,45 @@ print('Original test loss:', score[0])
 print('Original test accuracy:', score[1])
 
 weights = model.get_weights()
+min_weight_all = sys.float_info.max
+max_weight_all = sys.float_info.min
+num_weight = 0
+max_abs_all = 0
+min_abs_list = []
+max_abs_list = []
 for i in range(len(weights)):
+    if len(np.shape(weights[i])) == 1:  # skip layers with 1-dimesnion weights
+            continue
     num_weight += weights[i].size
     max_weight = np.max(weights[i])
     min_weight = np.min(weights[i])
-    max_abs = max(abs(max_weight), abs(min_weight))
+    max_abs_all = max(max_abs_all, max(abs(max_weight), abs(min_weight)))
+    # max_abs = max(abs(max_weight), abs(min_weight))
+    min_weight_all = min(min_weight_all, min_weight)
+    max_weight_all = max(max_weight_all, max_weight)
+    min_abs_list.append(min(abs(max_weight), abs(min_weight)))
+    max_abs_list.append(max(abs(max_weight), abs(min_weight)))
+
+# print(max_weight_all)
+# print(min_weight_all)
+# print(min_abs_list)
+min_abs_all = min(abs(max_weight_all), abs(min_weight_all))
 influence = cal_influence(weights, 10)
-allocation = allocate_bits(influence, (AVE_BITS_PER_WEIGHT-2) * num_weight)
-quantilized = quant(weights, allocation)
+allocation = allocate_bits(influence, AVE_BITS_PER_WEIGHT - 2)
+# for i in range(len(allocation)):
+#     max_allocate_all = max(max_allocate_all, np.max(allocation[i]))
+quantilized = quant(weights, allocation, max_abs_list)
 model.set_weights(quantilized)
 
 score = model.evaluate(x_test, y_test)
 print('Our quantization test loss:', score[0])
 print('Our Quantization test accuracy:', score[1])
 
-# # Uniform Quantization
-# allocation = uniform_allocate_bits(influence, AVE_BITS_PER_WEIGHT)
-# quantilized = quant(weights, allocation)
-# model.set_weights(quantilized)
+# Uniform Quantization
+allocation = uniform_allocate_bits(influence, AVE_BITS_PER_WEIGHT - 2)
+uniform_quantilized = quant(weights, allocation, max_abs_list)
+model.set_weights(uniform_quantilized)
 
-# score = model.evaluate(x_test, y_test)
-# print('Uniform Quantization test loss:', score[0])
-# print('Uniform Quantization test accuracy:', score[1])
+score = model.evaluate(x_test, y_test)
+print('Uniform Quantization test loss:', score[0])
+print('Uniform Quantization test accuracy:', score[1])
