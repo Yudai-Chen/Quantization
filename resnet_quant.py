@@ -21,10 +21,12 @@ max_weight = 0
 min_weight = 0
 total_influence_list = []
 layer_size_list = []
+quant_list = []
 
 def cal_influence(weights, num_neighbors):
     global total_influence_list
     global layer_size_list
+    global quant_list
     # global max_abs_list
     # global max_weight_list
     # global min_weight_list
@@ -66,14 +68,17 @@ def cal_influence(weights, num_neighbors):
 
             layer_total_influence += this_influence
             layer_influence[sort_idx[j]] = this_influence
+
+            quant_list.append(i)
         
         total_influence_list.append(layer_total_influence)
         influence_list.append(layer_influence)
 
     # rehshape
     influence = []
+    quant_idx = 0
     # count_size = 0
-    for i in range(n):
+    for i in range(len(weights)):
         layer_shape = np.shape(weights[i])
         if len(layer_shape) == 1:
             continue
@@ -83,11 +88,13 @@ def cal_influence(weights, num_neighbors):
                 layer_size *= size
 
             # layer_list = influence_list[count_size : count_size + layer_size]
-            layer_list = influence_list[round(i/2)]
+            # layer_list = influence_list[round(i/2)]
+            layer_list = influence_list[quant_idx]
             # count_size += layer_size
             layer_weights = np.reshape(np.array(layer_list), layer_shape)
             influence.append(layer_weights)
             layer_size_list.append(layer_size)
+            quant_idx += 1
 
     return influence
 
@@ -134,12 +141,15 @@ def quant(weights, allocation, range_list):
 
     n = len(weights)
     new_weights = []
+    quant_idx = 0
     for i in range(n):
         if len(np.shape(weights[i])) == 1: 
             new_weights.append(weights[i])
         else:
-            layer_range = range_list[round(i/2)]
-            layer_allo = allocation[round(i/2)].flatten()
+            # layer_range = range_list[round(i/2)]
+            # layer_allo = allocation[round(i/2)].flatten()
+            layer_range = range_list[quant_idx]
+            layer_allo = allocation[quant_idx].flatten()
             layer_weights = weights[i].flatten()
             for j in range(layer_weights.size):
                 scale = (layer_range) / (2 ** layer_allo[j])
@@ -158,59 +168,61 @@ def quant(weights, allocation, range_list):
                 # layer_weights[j] = layer_weights[j] / scale
             layer_weights = np.reshape(layer_weights, np.shape(weights[i]))
             new_weights.append(layer_weights)
+            quant_idx += 1
+            print(i)
 
     return new_weights
 
-AVE_BITS_PER_WEIGHT = 8
+# AVE_BITS_PER_WEIGHT = 8
 
-model = load_model('models/resnet-cifar10/maxmodel.h5')
+# model = load_model('models/resnet-cifar10/maxmodel.h5')
 
-test_loss, test_score = model.evaluate(x_test, y_test)
-print("Test Loss:", test_loss)
-print("Test F1 Score:", test_score)
+# test_loss, test_score = model.evaluate(x_test, y_test)
+# print("Test Loss:", test_loss)
+# print("Test F1 Score:", test_score)
 
-weights = model.get_weights()
+# weights = model.get_weights()
 
-print("get weights")
-# min_abs_list = []
-max_abs_list = []
-# max_weight_list = []
-# min_weight_list = []
-for i in range(len(weights)):
-    if len(np.shape(weights[i])) == 1:  # skip layers with 1-dimesnion weights
-            continue
-    num_weight += weights[i].size
-    max_weight = np.max(weights[i])
-    min_weight = np.min(weights[i])
-    # max_abs = max(abs(max_weight), abs(min_weight))
-    # min_abs_list.append(min(abs(max_weight), abs(min_weight)))
-    max_abs_list.append(max(abs(max_weight), abs(min_weight)))
-    # max_weight_list.append(max_weight)
-    # min_weight_list.append(min_weight)
+# print("get weights")
+# # min_abs_list = []
+# max_abs_list = []
+# # max_weight_list = []
+# # min_weight_list = []
+# for i in range(len(weights)):
+#     if len(np.shape(weights[i])) == 1:  # skip layers with 1-dimesnion weights
+#             continue
+#     num_weight += weights[i].size
+#     max_weight = np.max(weights[i])
+#     min_weight = np.min(weights[i])
+#     # max_abs = max(abs(max_weight), abs(min_weight))
+#     # min_abs_list.append(min(abs(max_weight), abs(min_weight)))
+#     max_abs_list.append(max(abs(max_weight), abs(min_weight)))
+#     # max_weight_list.append(max_weight)
+#     # min_weight_list.append(min_weight)
     
-print(type(weights))
-print(type(weights[0]))
+# print(type(weights))
+# print(type(weights[0]))
 
-influence = cal_influence(weights, 10)
-print("get influence")
-allocation = allocate_bits(influence, AVE_BITS_PER_WEIGHT - 2)
-print("get allocation")
-quantilized = quant(weights, allocation, max_abs_list)
-print("get quantilized weights")
-model.set_weights(quantilized)
-print("set quantilized weights")
+# influence = cal_influence(weights, 10)
+# print("get influence")
+# allocation = allocate_bits(influence, AVE_BITS_PER_WEIGHT - 2)
+# print("get allocation")
+# quantilized = quant(weights, allocation, max_abs_list)
+# print("get quantilized weights")
+# model.set_weights(quantilized)
+# print("set quantilized weights")
 
-# Our quantization evaluation
-test_loss, test_score = model.evaluate(x_test, y_test)
-print('Our quantization test loss:', test_loss)
-print("Our Quantization test F1 Score:", test_score)
+# # Our quantization evaluation
+# test_loss, test_score = model.evaluate(x_test, y_test)
+# print('Our quantization test loss:', test_loss)
+# print("Our Quantization test F1 Score:", test_score)
 
-# Uniform Quantization
-allocation = uniform_allocate_bits(influence, AVE_BITS_PER_WEIGHT - 2)
-uniform_quantilized = quant(weights, allocation, max_abs_list)
-model.set_weights(uniform_quantilized)
+# # Uniform Quantization
+# allocation = uniform_allocate_bits(influence, AVE_BITS_PER_WEIGHT - 2)
+# uniform_quantilized = quant(weights, allocation, max_abs_list)
+# model.set_weights(uniform_quantilized)
 
-# resnet
-test_loss, test_score = model.evaluate(x_test, y_test)
-print('Uniform quantization test loss:', test_loss)
-print("Uniform Quantization test F1 Score:", test_score)
+# # resnet
+# test_loss, test_score = model.evaluate(x_test, y_test)
+# print('Uniform quantization test loss:', test_loss)
+# print("Uniform Quantization test F1 Score:", test_score)
