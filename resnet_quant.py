@@ -73,6 +73,7 @@ def cal_influence(weights, num_neighbors):
     # rehshape
     influence = []
     # count_size = 0
+    layer_idx = 0
     for i in range(n):
         layer_shape = np.shape(weights[i])
         if len(layer_shape) == 1:
@@ -83,11 +84,12 @@ def cal_influence(weights, num_neighbors):
                 layer_size *= size
 
             # layer_list = influence_list[count_size : count_size + layer_size]
-            layer_list = influence_list[round(i/2)]
+            layer_list = influence_list[layer_idx]
             # count_size += layer_size
             layer_weights = np.reshape(np.array(layer_list), layer_shape)
             influence.append(layer_weights)
             layer_size_list.append(layer_size)
+            layer_idx += 1
 
     return influence
 
@@ -134,12 +136,13 @@ def quant(weights, allocation, range_list):
 
     n = len(weights)
     new_weights = []
+    layer_idx = 0
     for i in range(n):
         if len(np.shape(weights[i])) == 1: 
             new_weights.append(weights[i])
         else:
-            layer_range = range_list[round(i/2)]
-            layer_allo = allocation[round(i/2)].flatten()
+            layer_range = range_list[layer_idx]
+            layer_allo = allocation[layer_idx].flatten()
             layer_weights = weights[i].flatten()
             for j in range(layer_weights.size):
                 # scale = (layer_range) / (2 ** layer_allo[j])
@@ -158,6 +161,7 @@ def quant(weights, allocation, range_list):
                 # layer_weights[j] = layer_weights[j] / scale
             layer_weights = np.reshape(layer_weights, np.shape(weights[i]))
             new_weights.append(layer_weights)
+            layer_idx += 1
 
     return new_weights
 
